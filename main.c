@@ -174,10 +174,11 @@ static void get_archive_name(void *params)
             {
             case 8: // Backspace
                 if (archive_name_index > 0)
+                {
                     archive_name_index -= 1;
-
-                uart_write_bytes(UART_PORT_NUM, (const char *)"\b \b", 3);
-                archive_name[archive_name_index] = ' ';
+                    uart_write_bytes(UART_PORT_NUM, (const char *)"\b \b", 3);
+                    archive_name[archive_name_index] = ' ';
+                }
                 break;
             case 13:                                                  // Enter
                 xEventGroupSetBits(xEventGroup, FILE_NAME_READY_BIT); // Nombre del archivo completo
