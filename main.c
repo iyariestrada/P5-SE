@@ -29,6 +29,49 @@ static const char *TAG = "sd_card";
 EventGroupHandle_t xEventGroup;
 const int FILE_NAME_READY_BIT = BIT0; // Bit para indicar que el nombre del archivo está completo
 
+void init_sd(void)
+{
+    esp_vfs_fat_sdmmc_mount_config_t mount_config = {
+        .format_if_mount_failed = true,
+        .max_files = 5,
+        .allocation_unit_size = 16 * 1024};
+
+    sdmmc_card_t *card;
+    const char mount_point[] = MOUNT_POINT;
+
+    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
+    host.max_freq_khz = 5000;
+
+    spi_bus_config_t bus_cfg = {
+        .mosi_io_num = PIN_NUM_MOSI,
+        .miso_io_num = PIN_NUM_MISO,
+        .sclk_io_num = PIN_NUM_CLK,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .max_transfer_sz = 4000,
+    };
+
+    esp_err_t ret = spi_bus_initialize(host.slot, &bus_cfg, SDSPI_DEFAULT_DMA);
+
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Fallo al inicializar el bus SPI.");
+        return;
+    }
+
+    sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
+    slot_config.gpio_cs = PIN_NUM_CS;
+    slot_config.host_id = host.slot;
+
+    ret = esp_vfs_fat_sdspi_mount(mount_point, &host, &slot_config, &mount_config, &card);
+
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "No se pudo montar el sistema de archivos.");
+        return;
+    }
+}
+
 static esp_err_t read_file(const char *filename, char *message_compressed)
 {
     FILE *f = fopen(filename, "r");
@@ -41,7 +84,7 @@ static esp_err_t read_file(const char *filename, char *message_compressed)
     return ESP_OK;
 }
 
-static void decompress_message(char *compressed, char *decompressed)
+void decompress_message(char *compressed, char *decompressed)
 {
     uint8_t index, repeat;
     uint8_t compressed_index = 0, decompressed_index = 0;
@@ -98,9 +141,7 @@ static void decompress_message(char *compressed, char *decompressed)
             }
         }
         else
-        {
             decompressed[decompressed_index++] = compressed[compressed_index++];
-        }
     }
     decompressed[decompressed_index] = '\0';
 }
@@ -133,9 +174,8 @@ static void get_archive_name(void *params)
             {
             case 8: // Backspace
                 if (archive_name_index > 0)
-                {
                     archive_name_index -= 1;
-                }
+
                 uart_write_bytes(UART_PORT_NUM, (const char *)"\b \b", 3);
                 archive_name[archive_name_index] = ' ';
                 break;
@@ -171,6 +211,7 @@ static void sd_task(void *params)
 
     while (1)
     {
+
         uart_write_bytes(UART_PORT_NUM, "\n\nNombre del archivo: ", strlen("\n\nNombre del archivo: "));
 
         xEventGroupWaitBits(xEventGroup, FILE_NAME_READY_BIT, pdTRUE, pdFALSE, portMAX_DELAY);
@@ -184,9 +225,7 @@ static void sd_task(void *params)
             uart_write_bytes(UART_PORT_NUM, decompressed_message, strlen(decompressed_message));
         }
         else
-        {
             uart_write_bytes(UART_PORT_NUM, "\nArchivo no encontrado.", strlen("\nArchivo no encontrado."));
-        }
 
         archive_name_index = 0;                        // Reiniciar el nombre del archivo después de procesarlo
         memset(archive_name, 0, sizeof(archive_name)); // Limpiar el nombre del archivo
@@ -199,46 +238,7 @@ void app_main(void)
 {
     xEventGroup = xEventGroupCreate();
 
-    // Inicializar SD
-    esp_vfs_fat_sdmmc_mount_config_t mount_config = {
-        .format_if_mount_failed = true,
-        .max_files = 5,
-        .allocation_unit_size = 16 * 1024};
-
-    sdmmc_card_t *card;
-    const char mount_point[] = MOUNT_POINT;
-
-    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    host.max_freq_khz = 5000;
-
-    spi_bus_config_t bus_cfg = {
-        .mosi_io_num = PIN_NUM_MOSI,
-        .miso_io_num = PIN_NUM_MISO,
-        .sclk_io_num = PIN_NUM_CLK,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
-        .max_transfer_sz = 4000,
-    };
-
-    esp_err_t ret = spi_bus_initialize(host.slot, &bus_cfg, SDSPI_DEFAULT_DMA);
-
-    if (ret != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Fallo al inicializar el bus SPI.");
-        return;
-    }
-
-    sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
-    slot_config.gpio_cs = PIN_NUM_CS;
-    slot_config.host_id = host.slot;
-
-    ret = esp_vfs_fat_sdspi_mount(mount_point, &host, &slot_config, &mount_config, &card);
-
-    if (ret != ESP_OK)
-    {
-        ESP_LOGE(TAG, "No se pudo montar el sistema de archivos.");
-        return;
-    }
+    init_sd();
 
     xTaskCreate(get_archive_name, "get_archive_name", 2048, NULL, 1, NULL);
     xTaskCreate(sd_task, "sd_task", 4096, NULL, 1, NULL);
